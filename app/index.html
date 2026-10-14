@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Comparador de vuelos</title>
+  <meta name="theme-color" content="#0b5cad">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>✈️ Comparador de vuelos</h1>
+    <button id="btn-settings" class="icon-btn" aria-label="Ajustes">⚙️</button>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Aeropuertos de origen</h2>
+      <div id="origins" class="chips"></div>
+      <form id="add-origin" class="row">
+        <div class="ac">
+          <input id="origin-input" placeholder="Añadir aeropuerto (ej. Ein, Valencia, VLC)" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="origin-suggest">
+          <ul id="origin-suggest" class="ac-list hidden" role="listbox"></ul>
+        </div>
+        <button type="submit">Añadir</button>
+      </form>
+      <p id="fixed-note" class="note"></p>
+    </section>
+
+    <section class="card">
+      <h2>Fechas</h2>
+      <form id="search" class="grid">
+        <div class="dates">
+          <label>Ida
+            <input id="depart" type="date" required>
+          </label>
+          <label>Vuelta
+            <input id="return" type="date">
+          </label>
+        </div>
+        <label class="check"><input id="oneway" type="checkbox"> Solo ida</label>
+        <label>Destinos
+          <select id="coverage">
+            <option value="2">Con vuelo desde al menos 2 orígenes</option>
+            <option value="all">Con vuelo desde todos los orígenes</option>
+            <option value="1">Todos</option>
+          </select>
+        </label>
+        <label class="check"><input id="hide-single" type="checkbox" checked> Ocultar destinos con vuelo desde un solo aeropuerto</label>
+        <label>Ordenar por
+          <select id="sort">
+            <option value="diff">Menor diferencia de precio entre orígenes</option>
+            <option value="cheap">Más barato</option>
+            <option value="name">Nombre del destino</option>
+          </select>
+        </label>
+        <label class="check"><input id="direct" type="checkbox"> Solo directos (sin escalas en la ida ni en la vuelta)</label>
+        <button type="submit" class="primary">Buscar destinos más baratos</button>
+      </form>
+      <p id="mode-note" class="note"></p>
+    </section>
+
+    <section id="results" class="results"></section>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog" class="grid">
+      <h2>Ajustes</h2>
+      <label>URL del proxy de precios
+        <input id="proxy-url" placeholder="https://comparador-vuelos.tu-cuenta.workers.dev">
+      </label>
+      <p class="note">Vacío = modo demo con precios inventados. Las claves de las APIs viven en el proxy, nunca en el móvil.</p>
+      <label>Moneda
+        <select id="currency"><option>EUR</option><option>PLN</option><option>GBP</option><option>USD</option></select>
+      </label>
+      <div class="row end">
+        <button value="cancel">Cancelar</button>
+        <button id="save-settings" value="ok" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detail" class="detail">
+    <form method="dialog" class="detail-close"><button aria-label="Cerrar">✕</button></form>
+    <div class="detail-body"></div>
+  </dialog>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

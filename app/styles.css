@@ -1,0 +1,91 @@
+:root {
+  --bg: #f4f6f9; --surface: #fff; --text: #17202b; --muted: #5d6b7a;
+  --border: #dbe1e8; --accent: #0b5cad; --best: #1a7f37; --best-bg: #e3f5e8;
+  --c0: #0b5cad; --c1: #c2410c; --c2: #7c3aed; --c3: #0f766e; --c4: #be185d;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f141a; --surface: #18202a; --text: #e6edf3; --muted: #93a1b0;
+    --border: #2a3542; --accent: #5aa3f0; --best: #4ade80; --best-bg: #13301e;
+    --c0: #5aa3f0; --c1: #fb923c; --c2: #a78bfa; --c3: #2dd4bf; --c4: #f472b6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+.top { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); background: var(--accent); color: #fff; }
+.top h1 { font-size: 1.15rem; margin: 0; }
+main { max-width: 900px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.card h2, dialog h2 { margin: 0 0 12px; font-size: 1rem; }
+.hidden { display: none; }
+.grid { display: grid; gap: 12px; }
+label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+label.check { display: flex; align-items: center; gap: 6px; color: var(--text); }
+input, select, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); min-width: 0; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.icon-btn { background: transparent; border: 0; font-size: 1.3rem; color: #fff; }
+.row { display: flex; gap: 8px; margin-top: 12px; }
+.row input { flex: 1; width: 100%; }
+.row.end { justify-content: flex-end; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 2px solid var(--chip, var(--accent)); font-weight: 600; }
+.chip small { font-weight: 400; color: var(--muted); }
+.chip button { padding: 0 4px; border: 0; background: transparent; color: var(--muted); }
+.note { font-size: .8rem; color: var(--muted); margin: 8px 0 0; }
+.dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+input:disabled { opacity: .45; }
+.error { color: #b42318; }
+.results { display: grid; gap: 12px; }
+.res-title { font-size: 1rem; margin: 0; }
+.dest header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.dest h3 { margin: 0; font-size: 1.05rem; flex: 1; }
+.dest h3 small { color: var(--muted); font-weight: 400; }
+.dest .rank { color: var(--muted); font-weight: 700; }
+.dest .from { font-size: .9rem; color: var(--muted); white-space: nowrap; }
+.dest .from strong { color: var(--best); font-size: 1.1rem; }
+.dest ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dest li { display: grid; grid-template-columns: 3.2em 1fr auto; align-items: center; gap: 2px 8px; padding: 8px 10px; border-radius: 8px; border-left: 4px solid var(--chip); background: var(--bg); }
+.dest li.best { background: var(--best-bg); }
+.dest li.best .price { color: var(--best); }
+.dest li.none { color: var(--muted); }
+.dest li .info { font-size: .8rem; color: var(--muted); }
+.dest li .price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.dest li .actions, .dest li .live { grid-column: 2 / -1; font-size: .8rem; display: flex; gap: 10px; flex-wrap: wrap; }
+.dest li .actions:empty { display: none; }
+.dest li a, .live-btn { color: var(--accent); }
+.live-btn { padding: 0; border: 0; background: none; font-size: .8rem; text-decoration: underline; }
+.hidden { display: none !important; }
+.ac { position: relative; flex: 1; display: flex; }
+.ac input { flex: 1; width: 100%; }
+.ac-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10; list-style: none; margin: 0; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / .15); max-height: 320px; overflow-y: auto; }
+.ac-list li { padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+.ac-list li small { color: var(--muted); flex-basis: 100%; }
+.ac-list li.active, .ac-list li:hover { background: var(--bg); }
+.dest .from { text-align: right; }
+.dest .diff { font-size: .8rem; color: var(--muted); }
+.chip .pin { padding: 0 2px; border: 0; background: transparent; font-size: .9rem; opacity: .35; filter: grayscale(1); }
+.chip.fixed { background: var(--chip); color: #fff; }
+.chip.fixed small, .chip.fixed button { color: #fff; }
+.chip.fixed .pin { opacity: 1; filter: none; }
+.dest li.is-fixed { outline: 2px solid var(--chip); outline-offset: -2px; }
+.dest li.is-fixed .price { font-size: 1.1rem; }
+select:disabled { opacity: .45; }
+.dest { cursor: pointer; }
+.dest-head h3::after { content: ' ›'; color: var(--muted); }
+dialog.detail { width: min(96vw, 640px); padding: 16px; position: relative; }
+.detail-close { position: absolute; top: 8px; right: 8px; }
+.detail-close button { border: 0; background: transparent; font-size: 1.1rem; color: var(--muted); }
+.detail h2 { margin: 0 32px 4px 0; font-size: 1.15rem; }
+.detail h2 small { color: var(--muted); font-weight: 400; }
+.table-wrap { overflow-x: auto; margin-top: 12px; }
+.detail-table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.detail-table th, .detail-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.detail-table tbody th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.detail-table thead th { border-bottom: 3px solid var(--chip); }
+.detail-table thead th small { display: block; font-weight: 400; color: var(--muted); }
+.detail-table thead th.is-fixed { background: var(--best-bg); }
+.detail-table td.best { color: var(--best); background: var(--best-bg); }
+.detail-table td.none { color: var(--muted); }
+.detail-table a { color: var(--accent); }
+dialog.detail:focus-visible, dialog.detail:focus { outline: none; }

@@ -1,0 +1,7 @@
+name = "comparador-vuelos"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Las claves se añaden con:
+#   npx wrangler secret put TRAVELPAYOUTS_TOKEN
+#   npx wrangler secret put SERPAPI_KEY

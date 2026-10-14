@@ -1,0 +1,12 @@
+{
+  "name": "Comparador de vuelos",
+  "short_name": "Vuelos",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b5cad",
+  "theme_color": "#0b5cad",
+  "lang": "es",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
