@@ -284,7 +284,9 @@ export default {
         const when = (f) => f.departureDates?.[0]?.date || f.departureDates?.[0] || f.departureDate;
 
         // 6 peticiones ya hechas o en marcha (web, sesión, mapa, cambio, aeropuertos, ciudades).
-        const routes = (station.connections || []).filter((c) => c.isDirectFlight !== false).slice(0, 43);
+        // Las "estaciones falsas" (LON, ROM, NLM…) agrupan aeropuertos reales: repetirían destinos.
+        const fake = new Set((map.cities || []).filter((c) => c.isFakeStation).map((c) => c.iata));
+        const routes = (station.connections || []).filter((c) => c.isDirectFlight !== false && !fake.has(c.iata)).slice(0, 43);
         const flights = [];
         let failed = 0;
         let lastError = '';
