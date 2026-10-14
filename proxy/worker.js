@@ -1,5 +1,6 @@
 // Cloudflare Worker: guarda las claves de las APIs y añade CORS para la PWA.
 // Secretos: TRAVELPAYOUTS_TOKEN (destinos más baratos) y SERPAPI_KEY (precio en directo).
+// Ryanair y Wizz Air no necesitan clave.
 // Variable opcional: ALLOWED_ORIGIN.
 
 const TP_PRICES = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
@@ -42,6 +43,55 @@ function ryanairLink(out, back) {
     isReturn: back ? 'true' : 'false', originIata: out.departureAirport.iataCode, destinationIata: out.arrivalAirport.iataCode,
   });
   return `https://www.ryanair.com/es/es/trip/flights/select?${p}`;
+}
+
+// Wizz Air: API interna de su web (no oficial). Pide una sesión como el navegador, saca la lista
+// de rutas del aeropuerto y consulta el calendario de precios de cada destino.
+const WIZZ_HOME = 'https://www.wizzair.com/en-gb';
+const WIZZ_API = 'https://be.wizzair.com';
+const WIZZ_DEFAULT_VERSION = '29.14.0';
+const WIZZ_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+
+const shiftDay = (iso, days) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+// Junta las cookies de una respuesta en el tarro (nombre -> valor).
+function keepCookies(jar, res) {
+  const list = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('Set-Cookie')].filter(Boolean);
+  for (const c of list) {
+    const [pair] = c.split(';');
+    const i = pair.indexOf('=');
+    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+  }
+}
+
+async function wizzSession() {
+  const jar = new Map();
+  const base = { 'User-Agent': WIZZ_UA, 'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8' };
+  const home = await fetch(WIZZ_HOME, { headers: { ...base, Accept: 'text/html' } });
+  keepCookies(jar, home);
+  const version = (await home.text()).match(/be\.wizzair\.com\/(\d+\.\d+\.\d+)\/Api/)?.[1] || WIZZ_DEFAULT_VERSION;
+  const api = `${WIZZ_API}/${version}/Api`;
+  const headers = () => ({
+    ...base, Accept: 'application/json, text/plain, */*', 'Content-Type': 'application/json',
+    Origin: 'https://www.wizzair.com', Referer: WIZZ_HOME,
+    Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
+    ...(jar.get('RequestVerificationToken') ? { 'X-RequestVerificationToken': jar.get('RequestVerificationToken') } : {}),
+  });
+  const call = async (path, body) => {
+    const res = await fetch(`${api}/${path}`, body
+      ? { method: 'POST', headers: headers(), body: JSON.stringify(body) }
+      : { headers: headers() });
+    keepCookies(jar, res); // el token cambia en cada respuesta
+    if (!res.ok) throw new Error(`wizzair ${res.status}`);
+    return res.json();
+  };
+  const session = await fetch(`${api}/userSession/new`, { headers: headers() });
+  keepCookies(jar, session);
+  return call;
 }
 
 const minutesBetween = (a, b) => (a && b ? Math.round((new Date(b) - new Date(a)) / 60000) : null);
@@ -144,7 +194,7 @@ export default {
           link: link(t), return_link: link(back),
         });
       });
-      // Ryanair: se pide aparte y se mezcla por ciudad, quedándose con el precio más barato.
+      // Ryanair: se pide aparte y se añade a la lista.
       const sources = { travelpayouts: flights.length, ryanair: 0 };
       try {
         const [fares, cities] = await Promise.all([
@@ -155,7 +205,7 @@ export default {
           }),
           getAirportCities(),
         ]);
-        const byCity = new Map(flights.map((f) => [f.destination, f]));
+        // Se añaden todas: si un destino lo vuelan varias aerolíneas, la app enseña cada opción.
         for (const fare of fares) {
           const out = fare.outbound;
           const back = fare.inbound || null;
@@ -163,10 +213,8 @@ export default {
           const airport = out.arrivalAirport.iataCode;
           const city = cities[airport] || airport;
           const price = Math.round(fare.summary?.price?.value ?? (out.price.value + (back ? back.price.value : 0)));
-          const prev = byCity.get(city);
-          if (prev && prev.price <= price) continue;
           sources.ryanair += 1;
-          byCity.set(city, {
+          flights.push({
             destination: city, name: names[city] || out.arrivalAirport.city?.name || out.arrivalAirport.name,
             price, airline: 'FR', transfers: 0,
             departure_at: out.departureDate, return_at: back ? back.departureDate : null,
@@ -179,14 +227,90 @@ export default {
             link: ryanairLink(out, back), return_link: null, source: 'ryanair',
           });
         }
-        flights.length = 0;
-        flights.push(...byCity.values());
       } catch (err) {
         sources.ryanair_error = err.message;
       }
 
       flights.sort((a, b) => a.price - b.price);
       return json({ flights, sources });
+    }
+
+    if (url.pathname === '/wizz') {
+      // Wizz Air: el más barato a cada destino desde un origen. Va en su propia llamada porque
+      // necesita una petición por destino y Cloudflare gratis permite 50 por llamada.
+      const origin = iata(url.searchParams.get('origin'));
+      const depart = url.searchParams.get('depart');
+      const ret = url.searchParams.get('return');
+      const flex = Math.min(3, Math.max(0, Number(url.searchParams.get('flex')) || 0));
+      const currency = (url.searchParams.get('currency') || 'eur').toUpperCase();
+      if (!origin || !isDate(depart) || (ret && !isDate(ret))) return json({ error: 'parámetros inválidos' }, 400);
+      const today = new Date().toISOString().slice(0, 10);
+      const from = (iso) => (shiftDay(iso, -flex) < today ? today : shiftDay(iso, -flex));
+
+      try {
+        const call = await wizzSession();
+        const [map, rates, cities, names] = await Promise.all([
+          call('asset/map?languageCode=en-gb'),
+          fetch('https://open.er-api.com/v6/latest/EUR', { cf: { cacheTtl: 21600, cacheEverything: true } })
+            .then((r) => r.json()).then((r) => r.rates || {}).catch(() => ({})),
+          getAirportCities(), getCityNames(),
+        ]);
+        const station = (map.cities || []).find((c) => c.iata === origin);
+        if (!station) return json({ flights: [], sources: { wizzair: 0 } });
+        const stationName = Object.fromEntries((map.cities || []).map((c) => [c.iata, c.shortName]));
+        // Wizz da cada precio en la moneda del aeropuerto de salida: se pasa a la moneda pedida.
+        const convert = (p) => {
+          if (!p?.amount) return null;
+          if (p.currencyCode === currency) return p.amount;
+          const a = rates[p.currencyCode];
+          const b = currency === 'EUR' ? 1 : rates[currency];
+          return a && b ? (p.amount / a) * b : null;
+        };
+        const cheapest = (list, after) => (list || [])
+          .filter((f) => f.priceType === 'price' && (!after || f.departureDate.slice(0, 10) > after))
+          .map((f) => ({ f, price: convert(f.price) }))
+          .filter((x) => x.price != null)
+          .reduce((a, b) => (!a || b.price < a.price ? b : a), null);
+        const when = (f) => f.departureDates?.[0]?.date || f.departureDates?.[0] || f.departureDate;
+
+        // 6 peticiones ya hechas o en marcha (web, sesión, mapa, cambio, aeropuertos, ciudades).
+        const routes = (station.connections || []).filter((c) => c.isDirectFlight !== false).slice(0, 43);
+        const flights = [];
+        let failed = 0;
+        for (let i = 0; i < routes.length; i += 6) {
+          await Promise.all(routes.slice(i, i + 6).map(async ({ iata: dest }) => {
+            const flightList = [{ departureStation: origin, arrivalStation: dest, from: from(depart), to: shiftDay(depart, flex) }];
+            if (ret) flightList.push({ departureStation: dest, arrivalStation: origin, from: from(ret), to: shiftDay(ret, flex) });
+            let data;
+            try {
+              data = await call('search/timetableV2', { flightList, priceType: 'regular', adultCount: 1, childCount: 0, infantCount: 0 });
+            } catch { failed += 1; return; }
+            const out = cheapest(data.outboundFlights);
+            if (!out) return;
+            const back = ret ? cheapest(data.returnFlights, out.f.departureDate.slice(0, 10)) : null;
+            if (ret && !back) return;
+            const city = cities[dest] || dest;
+            const outDay = out.f.departureDate.slice(0, 10);
+            const backDay = back ? back.f.departureDate.slice(0, 10) : 'null';
+            flights.push({
+              destination: city, name: names[city] || stationName[dest] || dest,
+              price: Math.round(out.price + (back ? back.price : 0)), airline: 'W6', transfers: 0,
+              departure_at: when(out.f), return_at: back ? when(back.f) : null,
+              flight_number: null, origin_airport: origin, destination_airport: dest,
+              duration_to: null, duration_back: null,
+              return_transfers: back ? 0 : null, return_airline: back ? 'W6' : null, return_flight_number: null,
+              price_out: Math.round(out.price), price_back: back ? Math.round(back.price) : null,
+              link: `https://wizzair.com/es-es/booking/select-flight/${origin}/${dest}/${outDay}/${backDay}/1/0/0/null`,
+              return_link: null, source: 'wizzair',
+            });
+          }));
+        }
+        if (routes.length && failed === routes.length) throw new Error('wizzair no responde');
+        flights.sort((a, b) => a.price - b.price);
+        return json({ flights, sources: { wizzair: flights.length, routes: routes.length, failed } });
+      } catch (err) {
+        return json({ error: err.message }, 502);
+      }
     }
 
     if (url.pathname === '/live') {

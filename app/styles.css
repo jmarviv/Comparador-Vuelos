@@ -92,3 +92,14 @@ dialog.detail:focus-visible, dialog.detail:focus { outline: none; }
 .empty ul { margin: 8px 0 0; padding-left: 18px; font-size: .9rem; }
 .empty p { margin: 0 0 4px; }
 .version { text-align: center; }
+.opts-title { margin: 18px 0 6px; font-size: 1rem; }
+.opts { margin: 0 0 12px; }
+.opts h3 { margin: 0 0 6px; font-size: .95rem; padding-left: 8px; border-left: 4px solid var(--chip); }
+.opts h3 small { font-weight: 400; color: var(--muted); }
+.opts ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.opts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: .9rem; }
+.opts li .price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.opts li .info, .opts li .actions { grid-column: 1 / -1; font-size: .8rem; color: var(--muted); }
+.opts li .actions a { color: var(--accent); }
+.opts li.best { background: var(--best-bg); }
+.opts li.best .price { color: var(--best); }

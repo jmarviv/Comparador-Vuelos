@@ -85,9 +85,13 @@ async function getCheapest(origin, depart, ret, direct, flex) {
     const url = new URL('/cheapest', settings.proxyUrl);
     Object.entries({ origin, depart, return: ret || '', flex, currency: settings.currency.toLowerCase(), direct: direct ? '1' : '0' })
       .forEach(([k, v]) => url.searchParams.set(k, v));
-    const res = await fetch(url);
+    // Wizz Air va en otra llamada al proxy; si falla, se sigue con el resto.
+    const wizz = new URL(url);
+    wizz.pathname = '/wizz';
+    const [res, wz] = await Promise.all([fetch(url), fetch(wizz).catch(() => null)]);
     if (!res.ok) throw new Error(`error ${res.status}`);
     list = (await res.json()).flights;
+    if (wz?.ok) list = list.concat((await wz.json()).flights || []);
   }
   return direct ? list.filter(isNonStop) : list;
 }
@@ -209,18 +213,26 @@ function addOrigin(p) {
   renderOrigins();
 }
 
-// Junta los resultados por destino: { code, name, byOrigin: { ALC: flight, ... }, best }
+// Junta los resultados por destino: { code, name, byOrigin: { ALC: flight, ... }, options: { ALC: [...] }, best }
+// byOrigin es el más barato desde cada origen; options, el más barato de cada aerolínea.
+const airlineKey = (f) => `${f.airline || '?'}/${f.return_airline || f.airline || '?'}`;
+
 function groupByDestination(perOrigin, fixedCode) {
   const map = new Map();
   for (const { origin, flights } of perOrigin) {
     for (const f of flights) {
-      const d = map.get(f.destination) || { code: f.destination, name: f.name || f.destination, byOrigin: {} };
-      const prev = d.byOrigin[origin.code];
-      if (!prev || f.price < prev.price) d.byOrigin[origin.code] = f;
+      const d = map.get(f.destination) || { code: f.destination, name: f.name || f.destination, byOrigin: {}, options: {} };
+      const opts = (d.options[origin.code] ||= []);
+      const same = opts.findIndex((o) => airlineKey(o) === airlineKey(f));
+      if (same < 0) opts.push(f); else if (f.price < opts[same].price) opts[same] = f;
       map.set(f.destination, d);
     }
   }
   for (const d of map.values()) {
+    for (const [code, opts] of Object.entries(d.options)) {
+      opts.sort((a, b) => a.price - b.price);
+      d.byOrigin[code] = opts[0];
+    }
     const prices = Object.values(d.byOrigin).map((f) => f.price);
     d.best = Math.min(...prices);
     if (fixedCode && d.byOrigin[fixedCode]) {
@@ -280,7 +292,8 @@ function renderResults() {
         const f = d.byOrigin[o.code];
         if (!perOrigin.some((r) => r.origin.code === o.code)) return '';
         if (!f) return `<li class="none" style="--chip:${colorOf(i)}"><b>${escapeHtml(o.code)}</b><span>Sin vuelos</span></li>`;
-        const info = [`${fmtDay(f.departure_at)} ${fmtTime(f.departure_at)}`.trim(), f.return_at && `vuelta ${fmtDay(f.return_at)}`, f.return_at ? `ida ${fmtStops(f.transfers).toLowerCase()} · vuelta ${fmtStops(f.return_transfers).toLowerCase()}` : fmtStops(f.transfers).toLowerCase(), f.airline].filter(Boolean).join(' · ');
+        const info = [`${fmtDay(f.departure_at)} ${fmtTime(f.departure_at)}`.trim(), f.return_at && `vuelta ${fmtDay(f.return_at)}`, f.return_at ? `ida ${fmtStops(f.transfers).toLowerCase()} · vuelta ${fmtStops(f.return_transfers).toLowerCase()}` : fmtStops(f.transfers).toLowerCase(), AIRLINES[f.airline] || f.airline,
+          d.options[o.code].length > 1 && `${d.options[o.code].length} aerolíneas`].filter(Boolean).join(' · ');
         return `<li class="${f.price === d.best ? 'best' : ''}${o.code === fixedCode ? ' is-fixed' : ''}" style="--chip:${colorOf(i)}">
           <b>${escapeHtml(o.code)}</b><span class="info">${escapeHtml(info)}</span><span class="price">${fmtPrice(f.price)}</span>
           <span class="actions">${bookLinks(f)}
@@ -321,7 +334,8 @@ function renderResults() {
 function bookLinks(f) {
   const a = (href, text) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${text}</a>`;
   if (f.return_link) return [f.link && a(f.link, 'Reservar ida'), a(f.return_link, 'Reservar vuelta')].filter(Boolean).join(' · ');
-  return f.link ? a(f.link, f.link.includes('ryanair.com') ? 'Reservar en Ryanair' : 'Reservar en Aviasales') : '';
+  const site = f.link?.includes('ryanair.com') ? 'Ryanair' : f.link?.includes('wizzair.com') ? 'Wizz Air' : 'Aviasales';
+  return f.link ? a(f.link, `Reservar en ${site}`) : '';
 }
 
 // Ficha de un destino: compara el vuelo desde cada aeropuerto de origen.
@@ -353,11 +367,26 @@ function openDetail(d, searched, fixedCode, depart, ret) {
     return `<td class="${highlight && f.price === d.best ? 'best' : ''}">${cell(f)}</td>`;
   }).join('')}</tr>`).join('');
 
+  // Todas las aerolíneas que vuelan a este destino desde cada aeropuerto, de más barata a más cara.
+  const optionList = cols.filter(({ f }) => f).map(({ o, i }) => {
+    const opts = d.options[o.code];
+    return `<section class="opts" style="--chip:${colorOf(i)}"><h3>${escapeHtml(o.code)} <small>${escapeHtml(o.name)} · ${opts.length} ${opts.length > 1 ? 'aerolíneas' : 'aerolínea'}</small></h3>
+      <ul>${opts.map((f, n) => {
+        const airline = f.return_airline && f.return_airline !== f.airline
+          ? `${AIRLINES[f.airline] || f.airline} + ${AIRLINES[f.return_airline] || f.return_airline}` : (AIRLINES[f.airline] || f.airline || '—');
+        const info = [when(f.departure_at), f.return_at && `vuelta ${when(f.return_at)}`,
+          f.return_at ? `ida ${fmtStops(f.transfers).toLowerCase()} · vuelta ${fmtStops(f.return_transfers).toLowerCase()}` : fmtStops(f.transfers).toLowerCase()].filter(Boolean).join(' · ');
+        return `<li class="${n === 0 ? 'best' : ''}"><b>${escapeHtml(airline)}</b><span class="price">${fmtPrice(f.price)}</span>
+          <span class="info">${escapeHtml(info)}</span><span class="actions">${bookLinks(f)}</span></li>`;
+      }).join('')}</ul></section>`;
+  }).join('');
+
   const dlg = $('#detail');
   dlg.querySelector('.detail-body').innerHTML = `
     <h2>${escapeHtml(d.name)} <small>${escapeHtml(d.code)}</small></h2>
     <p class="note">${fmtDay(depart)}${ret ? ` → ${fmtDay(ret)}` : ' · solo ida'}. Cada columna es el vuelo más barato desde ese aeropuerto.</p>
-    <div class="table-wrap"><table class="detail-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    <div class="table-wrap"><table class="detail-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+    <h2 class="opts-title">Opciones por aerolínea</h2>${optionList}`;
   dlg.showModal();
 }
 
@@ -380,7 +409,7 @@ async function onSearch(e) {
 
 function updateModeNote() {
   $('#mode-note').textContent = settings.proxyUrl
-    ? 'Precios de Ryanair (en directo) y Travelpayouts (búsquedas recientes); pueden variar al reservar.'
+    ? 'Precios de Ryanair y Wizz Air (en directo) y Travelpayouts (búsquedas recientes); pueden variar al reservar.'
     : 'Modo demo: los precios son inventados hasta que configures el proxy en Ajustes.';
 }
 

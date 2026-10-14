@@ -1,6 +1,6 @@
 // Red primero: siempre intenta cargar la última versión publicada y usa la copia guardada
 // solo sin conexión. Los precios (otro dominio) no pasan por aquí.
-const CACHE = 'comparador-v13';
+const CACHE = 'comparador-v14';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(

@@ -11,6 +11,7 @@ Web instalable en el móvil (PWA). Eliges aeropuertos de origen y fechas, ida y 
 - Ordenar por menor diferencia de precio entre orígenes, por más barato o por nombre.
 - Aeropuerto fijo (📌): muestra todos sus destinos y ordena según su precio.
 - Ficha de cada destino con el vuelo desde cada aeropuerto: horarios, duración, escalas y aerolínea.
+- En la lista sale el más barato; en la ficha, la opción de cada aerolínea desde cada aeropuerto.
 - Filtros: solo directos (ida y vuelta) y ocultar destinos con vuelo desde un solo aeropuerto.
 - Autocompletado local de aeropuertos (`app/airports.js`, datos de OurAirports, dominio público).
 
@@ -20,7 +21,7 @@ Web instalable en el móvil (PWA). Eliges aeropuertos de origen y fechas, ida y 
 
 ## Precios reales
 
-Travelpayouts Data API (`aviasales/v3/prices_for_dates` sin destino, `unique=true`) para los destinos, y Google Flights vía SerpApi para confirmar en directo.
+Travelpayouts Data API (`aviasales/v3/prices_for_dates` sin destino, `unique=true`) para los destinos, más las tarifas en directo de Ryanair (`/cheapest`) y Wizz Air (`/wizz`, sus APIs internas, no oficiales), y Google Flights vía SerpApi para confirmar en directo. Wizz Air da cada precio en la moneda del aeropuerto de salida; el proxy lo convierte con open.er-api.com.
 
 1. Crear el Worker en Cloudflare con `proxy/worker.js`.
 2. Añadir los secretos `TRAVELPAYOUTS_TOKEN` y `SERPAPI_KEY` en el Worker. Nunca van en el repositorio.
