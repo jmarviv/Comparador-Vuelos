@@ -33,35 +33,61 @@ export default {
 
     if (url.pathname === '/cheapest') {
       // Vuelo más barato a cada destino desde un origen, para unas fechas.
+      // Ida y vuelta: la caché de Travelpayouts casi no tiene pares de fechas exactos, así que se
+      // busca la ida a todos los destinos y luego la vuelta de cada destino, y se suman.
       const origin = iata(url.searchParams.get('origin'));
       const depart = url.searchParams.get('depart');
       const ret = url.searchParams.get('return');
       if (!origin || !isDate(depart) || (ret && !isDate(ret))) return json({ error: 'parámetros inválidos' }, 400);
 
-      const params = {
-        origin, departure_at: depart, unique: 'true', sorting: 'price', limit: '1000',
+      const common = {
+        sorting: 'price', one_way: 'true', market: 'es',
         currency: url.searchParams.get('currency') || 'eur',
         direct: url.searchParams.get('direct') === '1' ? 'true' : 'false',
-        one_way: ret ? 'false' : 'true', market: 'es',
       };
-      if (ret) params.return_at = ret;
-      const q = new URL(TP_PRICES);
-      q.search = new URLSearchParams(params);
-      const [res, names] = await Promise.all([
-        fetch(q, { headers: { 'X-Access-Token': env.TRAVELPAYOUTS_TOKEN, 'Accept-Encoding': 'gzip' } }),
-        getCityNames(),
-      ]);
-      if (!res.ok) return json({ error: `travelpayouts ${res.status}` }, 502);
-      const data = (await res.json()).data || [];
+      const tp = async (params) => {
+        const q = new URL(TP_PRICES);
+        q.search = new URLSearchParams({ ...common, ...params });
+        const res = await fetch(q, { headers: { 'X-Access-Token': env.TRAVELPAYOUTS_TOKEN, 'Accept-Encoding': 'gzip' } });
+        if (!res.ok) throw new Error(`travelpayouts ${res.status}`);
+        return (await res.json()).data || [];
+      };
 
-      const flights = data.map((t) => ({
-        destination: t.destination, name: names[t.destination] || t.destination,
-        price: t.price, airline: t.airline, transfers: t.transfers,
-        departure_at: t.departure_at, return_at: t.return_at || null,
-        flight_number: t.flight_number, origin_airport: t.origin_airport, destination_airport: t.destination_airport,
-        duration_to: t.duration_to, duration_back: t.duration_back, return_transfers: t.return_transfers,
-        link: t.link ? `https://www.aviasales.com${t.link}` : null,
-      }));
+      let outbound;
+      let names;
+      try {
+        [outbound, names] = await Promise.all([
+          tp({ origin, departure_at: depart, unique: 'true', limit: '1000' }),
+          getCityNames(),
+        ]);
+      } catch (err) {
+        return json({ error: err.message }, 502);
+      }
+
+      // Vuelta más barata de cada destino al origen ese día (null si no hay).
+      const backs = ret
+        ? await Promise.all(outbound.map((t) => tp({ origin: t.destination, destination: origin, departure_at: ret, limit: '1' })
+          .then((d) => d[0] || null).catch(() => null)))
+        : [];
+
+      const link = (t) => (t?.link ? `https://www.aviasales.com${t.link}` : null);
+      const flights = [];
+      outbound.forEach((t, i) => {
+        const back = ret ? backs[i] : null;
+        if (ret && !back) return; // sin vuelta ese día: no sirve para el viaje
+        flights.push({
+          destination: t.destination, name: names[t.destination] || t.destination,
+          price: t.price + (back ? back.price : 0), airline: t.airline, transfers: t.transfers,
+          departure_at: t.departure_at, return_at: back ? back.departure_at : null,
+          flight_number: t.flight_number, origin_airport: t.origin_airport, destination_airport: t.destination_airport,
+          duration_to: t.duration_to ?? t.duration, duration_back: back ? (back.duration_to ?? back.duration) : null,
+          return_transfers: back ? back.transfers : null,
+          return_airline: back ? back.airline : null, return_flight_number: back ? back.flight_number : null,
+          price_out: t.price, price_back: back ? back.price : null,
+          link: link(t), return_link: link(back),
+        });
+      });
+      flights.sort((a, b) => a.price - b.price);
       return json({ flights });
     }
 

@@ -68,6 +68,7 @@ function demoCheapest(origin, depart, ret) {
       duration_to: 100 + Math.floor(rnd() * 120) + transfers * 150,
       duration_back: ret ? 100 + Math.floor(rnd() * 120) + returnTransfers * 150 : null,
       return_transfers: ret ? returnTransfers : null, link: null,
+      return_airline: ret ? airline : null,
     });
   }
   return out;
@@ -272,7 +273,7 @@ function renderResults() {
         const info = [fmtTime(f.departure_at) && `sale ${fmtTime(f.departure_at)}`, f.return_at ? `ida ${fmtStops(f.transfers).toLowerCase()} · vuelta ${fmtStops(f.return_transfers).toLowerCase()}` : fmtStops(f.transfers).toLowerCase(), f.airline].filter(Boolean).join(' · ');
         return `<li class="${f.price === d.best ? 'best' : ''}${o.code === fixedCode ? ' is-fixed' : ''}" style="--chip:${colorOf(i)}">
           <b>${escapeHtml(o.code)}</b><span class="info">${escapeHtml(info)}</span><span class="price">${fmtPrice(f.price)}</span>
-          <span class="actions">${f.link ? `<a href="${escapeHtml(f.link)}" target="_blank" rel="noopener">Aviasales</a>` : ''}
+          <span class="actions">${bookLinks(f)}
           ${settings.proxyUrl ? `<button class="live-btn" data-o="${escapeHtml(o.code)}" data-d="${escapeHtml(d.code)}">Confirmar en Google Flights</button>` : ''}</span>
           <div class="live hidden"></div>
         </li>`;
@@ -306,6 +307,13 @@ function renderResults() {
   });
 }
 
+// Enlaces de reserva; con ida y vuelta por separado son dos billetes.
+function bookLinks(f) {
+  const a = (href, text) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${text}</a>`;
+  if (f.return_link) return [f.link && a(f.link, 'Reservar ida'), a(f.return_link, 'Reservar vuelta')].filter(Boolean).join(' · ');
+  return f.link ? a(f.link, 'Reservar en Aviasales') : '';
+}
+
 // Ficha de un destino: compara el vuelo desde cada aeropuerto de origen.
 function openDetail(d, searched, fixedCode, depart, ret) {
   const cols = searched
@@ -313,7 +321,7 @@ function openDetail(d, searched, fixedCode, depart, ret) {
     .sort((a, b) => (b.o.code === fixedCode) - (a.o.code === fixedCode) || (a.f ? a.f.price : Infinity) - (b.f ? b.f.price : Infinity));
   const when = (iso) => (iso ? `${fmtDay(iso)}${fmtTime(iso) ? ` · ${fmtTime(iso)}` : ''}` : '—');
   const rows = [
-    ['Precio', (f) => `<strong>${fmtPrice(f.price)}</strong>`, true],
+    ['Precio', (f) => `<strong>${fmtPrice(f.price)}</strong>${f.price_back != null ? `<br><small>ida ${fmtPrice(f.price_out)} + vuelta ${fmtPrice(f.price_back)}</small>` : ''}`, true],
     ['Aerolínea', (f) => escapeHtml(airlineName(f.airline))],
     ['Vuelo', (f) => escapeHtml(f.flight_number ? `${f.airline || ''} ${f.flight_number}` : '—')],
     ['Ruta', (f) => escapeHtml(`${f.origin_airport || '?'} → ${f.destination_airport || d.code}`)],
@@ -322,10 +330,12 @@ function openDetail(d, searched, fixedCode, depart, ret) {
     ['Escalas ida', (f) => fmtStops(f.transfers)],
     ...(ret ? [
       ['Salida vuelta', (f) => when(f.return_at)],
+      ['Aerolínea vuelta', (f) => escapeHtml(airlineName(f.return_airline || f.airline))],
+      ['Vuelo vuelta', (f) => escapeHtml(f.return_flight_number ? `${f.return_airline || ''} ${f.return_flight_number}` : '—')],
       ['Duración vuelta', (f) => fmtDuration(f.duration_back)],
       ['Escalas vuelta', (f) => fmtStops(f.return_transfers)],
     ] : []),
-    ['Reservar', (f) => (f.link ? `<a href="${escapeHtml(f.link)}" target="_blank" rel="noopener">Aviasales</a>` : '—')],
+    ['Reservar', (f) => bookLinks(f) || '—'],
   ];
   const head = `<tr><th></th>${cols.map(({ o, i }) => `<th style="--chip:${colorOf(i)}" class="${o.code === fixedCode ? 'is-fixed' : ''}">${escapeHtml(o.code)}<small>${escapeHtml(o.name)}</small></th>`).join('')}</tr>`;
   const body = rows.map(([label, cell, highlight]) => `<tr><th>${label}</th>${cols.map(({ f }) => {

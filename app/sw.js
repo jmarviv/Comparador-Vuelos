@@ -1,5 +1,5 @@
 // Cachea la app para que abra sin conexión; los precios siempre van a la red.
-const CACHE = 'comparador-v10';
+const CACHE = 'comparador-v11';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'airports.js', 'config.js', 'manifest.webmanifest', 'icons/icon.svg'];
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS))));
