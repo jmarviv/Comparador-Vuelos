@@ -77,13 +77,13 @@ function demoCheapest(origin, depart, ret) {
 // Sin escalas = directo en la ida y, si hay vuelta, también en la vuelta.
 const isNonStop = (f) => f.transfers === 0 && !f.return_transfers;
 
-async function getCheapest(origin, depart, ret, direct) {
+async function getCheapest(origin, depart, ret, direct, flex) {
   let list;
   if (!settings.proxyUrl) {
     list = demoCheapest(origin, depart, ret);
   } else {
     const url = new URL('/cheapest', settings.proxyUrl);
-    Object.entries({ origin, depart, return: ret || '', currency: settings.currency.toLowerCase(), direct: direct ? '1' : '0' })
+    Object.entries({ origin, depart, return: ret || '', flex, currency: settings.currency.toLowerCase(), direct: direct ? '1' : '0' })
       .forEach(([k, v]) => url.searchParams.set(k, v));
     const res = await fetch(url);
     if (!res.ok) throw new Error(`error ${res.status}`);
@@ -256,10 +256,20 @@ function renderResults() {
     .filter((d) => !$('#hide-single').checked || perOrigin.length < 2 || Object.keys(d.byOrigin).length >= 2)
     .sort(SORTERS[$('#sort').value] || SORTERS.diff);
 
-  const head = `<h2 class="res-title">${dests.length} destinos · ${fmtDay(depart)}${ret ? ` → ${fmtDay(ret)}` : ' · solo ida'}</h2>`;
+  const flexTxt = Number($('#flex').value) ? ` (±${$('#flex').value} días)` : '';
+  const head = `<h2 class="res-title">${dests.length} destinos · ${fmtDay(depart)}${ret ? ` → ${fmtDay(ret)}` : ' · solo ida'}${flexTxt}</h2>`;
   const errHtml = errors.map((r) => `<p class="error">${escapeHtml(r.origin.code)}: no se pudieron cargar precios (${escapeHtml(r.error)})</p>`).join('');
   if (!dests.length) {
-    box.innerHTML = head + errHtml + '<p class="note">No hay destinos que cumplan el filtro. Prueba con "Todos" o con otras fechas.</p>';
+    // Explica por qué no sale nada: sin datos o filtros demasiado estrictos.
+    const perCount = perOrigin.filter((r) => !r.error).map((r) => `${escapeHtml(r.origin.code)}: ${r.flights.length}`).join(' · ');
+    const total = groupByDestination(perOrigin, null).length;
+    const tips = [];
+    if (total) tips.push('Ningún destino coincide entre tus aeropuertos con estos filtros. Prueba a poner "Destinos: Todos" y desmarcar "Ocultar destinos con vuelo desde un solo aeropuerto".');
+    if ($('#flex').value < 3) tips.push('Aumenta la flexibilidad de fechas para encontrar más vuelos.');
+    if ($('#direct').checked) tips.push('Desmarca "Solo directos".');
+    box.innerHTML = head + errHtml + `<div class="card empty"><p><strong>No hay destinos con estos filtros.</strong></p>
+      <p class="note">Destinos encontrados por aeropuerto: ${perCount || 'ninguno'}</p>
+      <ul>${tips.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`;
     return;
   }
 
@@ -270,7 +280,7 @@ function renderResults() {
         const f = d.byOrigin[o.code];
         if (!perOrigin.some((r) => r.origin.code === o.code)) return '';
         if (!f) return `<li class="none" style="--chip:${colorOf(i)}"><b>${escapeHtml(o.code)}</b><span>Sin vuelos</span></li>`;
-        const info = [fmtTime(f.departure_at) && `sale ${fmtTime(f.departure_at)}`, f.return_at ? `ida ${fmtStops(f.transfers).toLowerCase()} · vuelta ${fmtStops(f.return_transfers).toLowerCase()}` : fmtStops(f.transfers).toLowerCase(), f.airline].filter(Boolean).join(' · ');
+        const info = [`${fmtDay(f.departure_at)} ${fmtTime(f.departure_at)}`.trim(), f.return_at && `vuelta ${fmtDay(f.return_at)}`, f.return_at ? `ida ${fmtStops(f.transfers).toLowerCase()} · vuelta ${fmtStops(f.return_transfers).toLowerCase()}` : fmtStops(f.transfers).toLowerCase(), f.airline].filter(Boolean).join(' · ');
         return `<li class="${f.price === d.best ? 'best' : ''}${o.code === fixedCode ? ' is-fixed' : ''}" style="--chip:${colorOf(i)}">
           <b>${escapeHtml(o.code)}</b><span class="info">${escapeHtml(info)}</span><span class="price">${fmtPrice(f.price)}</span>
           <span class="actions">${bookLinks(f)}
@@ -361,7 +371,7 @@ async function onSearch(e) {
   const direct = $('#direct').checked;
   $('#results').innerHTML = '<p class="note">Buscando destinos…</p>';
   const perOrigin = await Promise.all(origins.map(async (origin) => {
-    try { return { origin, flights: await getCheapest(origin.code, depart, ret, direct) }; }
+    try { return { origin, flights: await getCheapest(origin.code, depart, ret, direct, $('#flex').value) }; }
     catch (err) { return { origin, flights: [], error: err.message }; }
   }));
   lastSearch = { perOrigin, depart, ret };

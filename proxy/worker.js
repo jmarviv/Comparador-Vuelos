@@ -32,12 +32,13 @@ export default {
     const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
 
     if (url.pathname === '/cheapest') {
-      // Vuelo más barato a cada destino desde un origen, para unas fechas.
-      // Ida y vuelta: la caché de Travelpayouts casi no tiene pares de fechas exactos, así que se
-      // busca la ida a todos los destinos y luego la vuelta de cada destino, y se suman.
+      // Vuelo más barato a cada destino desde un origen, para unas fechas con flexibilidad de ± días.
+      // La caché de Travelpayouts tiene huecos para días concretos, así que se mira cada día de la
+      // ventana de ida y, para la vuelta, el mes entero de cada destino filtrando por la ventana.
       const origin = iata(url.searchParams.get('origin'));
       const depart = url.searchParams.get('depart');
       const ret = url.searchParams.get('return');
+      const flex = Math.min(3, Math.max(0, Number(url.searchParams.get('flex')) || 0));
       if (!origin || !isDate(depart) || (ret && !isDate(ret))) return json({ error: 'parámetros inválidos' }, 400);
 
       const common = {
@@ -52,29 +53,47 @@ export default {
         if (!res.ok) throw new Error(`travelpayouts ${res.status}`);
         return (await res.json()).data || [];
       };
+      const shift = (iso, days) => {
+        const d = new Date(`${iso}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + days);
+        return d.toISOString().slice(0, 10);
+      };
+      const window = (iso) => Array.from({ length: 2 * flex + 1 }, (_, i) => shift(iso, i - flex));
 
-      let outbound;
+      // Ida: el más barato a cada destino entre todos los días de la ventana.
       let names;
+      const best = new Map();
       try {
-        [outbound, names] = await Promise.all([
-          tp({ origin, departure_at: depart, unique: 'true', limit: '1000' }),
+        const [days, n] = await Promise.all([
+          Promise.all(window(depart).map((d) => tp({ origin, departure_at: d, unique: 'true', limit: '1000' }))),
           getCityNames(),
         ]);
+        names = n;
+        for (const t of days.flat()) {
+          const prev = best.get(t.destination);
+          if (!prev || t.price < prev.price) best.set(t.destination, t);
+        }
       } catch (err) {
         return json({ error: err.message }, 502);
       }
+      // Cloudflare gratis permite 50 peticiones por llamada: las vueltas se buscan para los más baratos.
+      const outbound = [...best.values()].sort((a, b) => a.price - b.price).slice(0, ret ? 50 - 2 * flex - 3 : undefined);
 
-      // Vuelta más barata de cada destino al origen ese día (null si no hay).
-      const backs = ret
-        ? await Promise.all(outbound.map((t) => tp({ origin: t.destination, destination: origin, departure_at: ret, limit: '1' })
-          .then((d) => d[0] || null).catch(() => null)))
-        : [];
+      let backs = [];
+      if (ret) {
+        const okDays = new Set(window(ret));
+        backs = await Promise.all(outbound.map((t) => tp({ origin: t.destination, destination: origin, departure_at: ret.slice(0, 7), limit: '1000' })
+          .then((list) => list
+            .filter((b) => okDays.has(b.departure_at.slice(0, 10)) && b.departure_at.slice(0, 10) > t.departure_at.slice(0, 10))
+            .reduce((a, b) => (!a || b.price < a.price ? b : a), null))
+          .catch(() => null)));
+      }
 
       const link = (t) => (t?.link ? `https://www.aviasales.com${t.link}` : null);
       const flights = [];
       outbound.forEach((t, i) => {
         const back = ret ? backs[i] : null;
-        if (ret && !back) return; // sin vuelta ese día: no sirve para el viaje
+        if (ret && !back) return; // sin vuelta en la ventana: no sirve para el viaje
         flights.push({
           destination: t.destination, name: names[t.destination] || t.destination,
           price: t.price + (back ? back.price : 0), airline: t.airline, transfers: t.transfers,

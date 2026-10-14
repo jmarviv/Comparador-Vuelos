@@ -89,3 +89,5 @@ dialog.detail { width: min(96vw, 640px); padding: 16px; position: relative; }
 .detail-table td.none { color: var(--muted); }
 .detail-table a { color: var(--accent); }
 dialog.detail:focus-visible, dialog.detail:focus { outline: none; }
+.empty ul { margin: 8px 0 0; padding-left: 18px; font-size: .9rem; }
+.empty p { margin: 0 0 4px; }
