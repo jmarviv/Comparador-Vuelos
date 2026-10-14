@@ -321,7 +321,7 @@ function renderResults() {
 function bookLinks(f) {
   const a = (href, text) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${text}</a>`;
   if (f.return_link) return [f.link && a(f.link, 'Reservar ida'), a(f.return_link, 'Reservar vuelta')].filter(Boolean).join(' · ');
-  return f.link ? a(f.link, 'Reservar en Aviasales') : '';
+  return f.link ? a(f.link, f.link.includes('ryanair.com') ? 'Reservar en Ryanair' : 'Reservar en Aviasales') : '';
 }
 
 // Ficha de un destino: compara el vuelo desde cada aeropuerto de origen.
@@ -380,7 +380,7 @@ async function onSearch(e) {
 
 function updateModeNote() {
   $('#mode-note').textContent = settings.proxyUrl
-    ? 'Precios de Travelpayouts (búsquedas recientes, pueden variar al reservar).'
+    ? 'Precios de Ryanair (en directo) y Travelpayouts (búsquedas recientes); pueden variar al reservar.'
     : 'Modo demo: los precios son inventados hasta que configures el proxy en Ajustes.';
 }
 

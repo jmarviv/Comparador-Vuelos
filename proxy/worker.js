@@ -6,7 +6,45 @@ const TP_PRICES = 'https://api.travelpayouts.com/aviasales/v3/prices_for_dates';
 const TP_CITIES = 'https://api.travelpayouts.com/data/en/cities.json';
 const PLACES = 'https://autocomplete.travelpayouts.com/places2';
 
+const TP_AIRPORTS = 'https://api.travelpayouts.com/data/en/airports.json';
+const RYANAIR = 'https://www.ryanair.com/api/farfnd/v4';
+
 let cityNames = null; // código IATA de ciudad -> nombre en español
+let airportCity = null; // código IATA de aeropuerto -> código de ciudad (STN -> LON)
+
+async function getAirportCities() {
+  if (airportCity) return airportCity;
+  const res = await fetch(TP_AIRPORTS, { cf: { cacheTtl: 86400, cacheEverything: true } });
+  const list = res.ok ? await res.json() : [];
+  airportCity = Object.fromEntries(list.map((a) => [a.code, a.city_code || a.code]));
+  return airportCity;
+}
+
+// Ryanair: API pública de su buscador de tarifas (no oficial). Precios reales de todos sus destinos
+// desde un aeropuerto, con un rango de fechas de ida y, opcionalmente, de vuelta.
+async function ryanairFares({ origin, departFrom, departTo, returnFrom, returnTo, currency }) {
+  const q = new URL(`${RYANAIR}/${returnFrom ? 'roundTripFares' : 'oneWayFares'}`);
+  const params = {
+    departureAirportIataCode: origin, outboundDepartureDateFrom: departFrom, outboundDepartureDateTo: departTo,
+    currency: currency.toUpperCase(), market: 'es-es', language: 'es',
+  };
+  if (returnFrom) Object.assign(params, { inboundDepartureDateFrom: returnFrom, inboundDepartureDateTo: returnTo });
+  q.search = new URLSearchParams(params);
+  const res = await fetch(q, { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (comparador-vuelos)' } });
+  if (!res.ok) throw new Error(`ryanair ${res.status}`);
+  return (await res.json()).fares || [];
+}
+
+function ryanairLink(out, back) {
+  const p = new URLSearchParams({
+    adults: '1', teens: '0', children: '0', infants: '0',
+    dateOut: out.departureDate.slice(0, 10), dateIn: back ? back.departureDate.slice(0, 10) : '',
+    isReturn: back ? 'true' : 'false', originIata: out.departureAirport.iataCode, destinationIata: out.arrivalAirport.iataCode,
+  });
+  return `https://www.ryanair.com/es/es/trip/flights/select?${p}`;
+}
+
+const minutesBetween = (a, b) => (a && b ? Math.round((new Date(b) - new Date(a)) / 60000) : null);
 
 async function getCityNames() {
   if (cityNames) return cityNames;
@@ -77,7 +115,7 @@ export default {
         return json({ error: err.message }, 502);
       }
       // Cloudflare gratis permite 50 peticiones por llamada: las vueltas se buscan para los más baratos.
-      const outbound = [...best.values()].sort((a, b) => a.price - b.price).slice(0, ret ? 50 - 2 * flex - 3 : undefined);
+      const outbound = [...best.values()].sort((a, b) => a.price - b.price).slice(0, ret ? 50 - 2 * flex - 5 : undefined);
 
       let backs = [];
       if (ret) {
@@ -106,8 +144,49 @@ export default {
           link: link(t), return_link: link(back),
         });
       });
+      // Ryanair: se pide aparte y se mezcla por ciudad, quedándose con el precio más barato.
+      const sources = { travelpayouts: flights.length, ryanair: 0 };
+      try {
+        const [fares, cities] = await Promise.all([
+          ryanairFares({
+            origin, departFrom: shift(depart, -flex), departTo: shift(depart, flex),
+            returnFrom: ret ? shift(ret, -flex) : null, returnTo: ret ? shift(ret, flex) : null,
+            currency: common.currency,
+          }),
+          getAirportCities(),
+        ]);
+        const byCity = new Map(flights.map((f) => [f.destination, f]));
+        for (const fare of fares) {
+          const out = fare.outbound;
+          const back = fare.inbound || null;
+          if (!out?.price || (ret && !back?.price)) continue;
+          const airport = out.arrivalAirport.iataCode;
+          const city = cities[airport] || airport;
+          const price = Math.round(fare.summary?.price?.value ?? (out.price.value + (back ? back.price.value : 0)));
+          const prev = byCity.get(city);
+          if (prev && prev.price <= price) continue;
+          sources.ryanair += 1;
+          byCity.set(city, {
+            destination: city, name: names[city] || out.arrivalAirport.city?.name || out.arrivalAirport.name,
+            price, airline: 'FR', transfers: 0,
+            departure_at: out.departureDate, return_at: back ? back.departureDate : null,
+            flight_number: out.flightNumber?.replace(/^FR\s*/, ''), origin_airport: origin, destination_airport: airport,
+            duration_to: minutesBetween(out.departureDate, out.arrivalDate),
+            duration_back: back ? minutesBetween(back.departureDate, back.arrivalDate) : null,
+            return_transfers: back ? 0 : null, return_airline: back ? 'FR' : null,
+            return_flight_number: back?.flightNumber?.replace(/^FR\s*/, ''),
+            price_out: Math.round(out.price.value), price_back: back ? Math.round(back.price.value) : null,
+            link: ryanairLink(out, back), return_link: null, source: 'ryanair',
+          });
+        }
+        flights.length = 0;
+        flights.push(...byCity.values());
+      } catch (err) {
+        sources.ryanair_error = err.message;
+      }
+
       flights.sort((a, b) => a.price - b.price);
-      return json({ flights });
+      return json({ flights, sources });
     }
 
     if (url.pathname === '/live') {
