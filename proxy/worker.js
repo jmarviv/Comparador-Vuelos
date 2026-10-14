@@ -73,7 +73,14 @@ async function wizzSession() {
   const base = { 'User-Agent': WIZZ_UA, 'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8' };
   const home = await fetch(WIZZ_HOME, { headers: { ...base, Accept: 'text/html' } });
   keepCookies(jar, home);
-  const version = (await home.text()).match(/be\.wizzair\.com\/(\d+\.\d+\.\d+)\/Api/)?.[1] || WIZZ_DEFAULT_VERSION;
+  const findVersion = (t) => t.match(/be\.wizzair\.com\/(\d+\.\d+\.\d+)/)?.[1];
+  let version = findVersion(await home.text());
+  if (!version) {
+    // Plan B: la web publica su versión en /buildnumber.
+    const build = await fetch('https://wizzair.com/buildnumber', { headers: base }).catch(() => null);
+    version = (build?.ok && findVersion(await build.text())) || WIZZ_DEFAULT_VERSION;
+  }
+  const status = { home: home.status, version };
   const api = `${WIZZ_API}/${version}/Api`;
   const headers = () => ({
     ...base, Accept: 'application/json, text/plain, */*', 'Content-Type': 'application/json',
@@ -86,11 +93,13 @@ async function wizzSession() {
       ? { method: 'POST', headers: headers(), body: JSON.stringify(body) }
       : { headers: headers() });
     keepCookies(jar, res); // el token cambia en cada respuesta
-    if (!res.ok) throw new Error(`wizzair ${res.status}`);
+    if (!res.ok) throw new Error(`wizzair ${path.split('?')[0]} ${res.status}`);
     return res.json();
   };
   const session = await fetch(`${api}/userSession/new`, { headers: headers() });
   keepCookies(jar, session);
+  status.session = session.status;
+  call.status = status;
   return call;
 }
 
@@ -247,8 +256,9 @@ export default {
       const today = new Date().toISOString().slice(0, 10);
       const from = (iso) => (shiftDay(iso, -flex) < today ? today : shiftDay(iso, -flex));
 
+      let call;
       try {
-        const call = await wizzSession();
+        call = await wizzSession();
         const [map, rates, cities, names] = await Promise.all([
           call('asset/map?languageCode=en-gb'),
           fetch('https://open.er-api.com/v6/latest/EUR', { cf: { cacheTtl: 21600, cacheEverything: true } })
@@ -277,6 +287,7 @@ export default {
         const routes = (station.connections || []).filter((c) => c.isDirectFlight !== false).slice(0, 43);
         const flights = [];
         let failed = 0;
+        let lastError = '';
         for (let i = 0; i < routes.length; i += 6) {
           await Promise.all(routes.slice(i, i + 6).map(async ({ iata: dest }) => {
             const flightList = [{ departureStation: origin, arrivalStation: dest, from: from(depart), to: shiftDay(depart, flex) }];
@@ -284,7 +295,7 @@ export default {
             let data;
             try {
               data = await call('search/timetableV2', { flightList, priceType: 'regular', adultCount: 1, childCount: 0, infantCount: 0 });
-            } catch { failed += 1; return; }
+            } catch (err) { failed += 1; lastError = err.message; return; }
             const out = cheapest(data.outboundFlights);
             if (!out) return;
             const back = ret ? cheapest(data.returnFlights, out.f.departureDate.slice(0, 10)) : null;
@@ -305,11 +316,12 @@ export default {
             });
           }));
         }
-        if (routes.length && failed === routes.length) throw new Error('wizzair no responde');
+        if (routes.length && failed === routes.length) throw new Error(`wizzair timetable falla en todas las rutas (${lastError})`);
         flights.sort((a, b) => a.price - b.price);
-        return json({ flights, sources: { wizzair: flights.length, routes: routes.length, failed } });
+        return json({ flights, sources: { wizzair: flights.length, routes: routes.length, failed, ...call.status } });
       } catch (err) {
-        return json({ error: err.message }, 502);
+        // Responde 200 para que la app siga con las demás fuentes; el detalle sirve para depurar.
+        return json({ flights: [], sources: { wizzair: 0, wizzair_error: err.message, ...(call?.status || {}) } });
       }
     }
 
